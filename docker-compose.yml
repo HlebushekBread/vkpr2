@@ -1,0 +1,82 @@
+services:
+  source-db:
+    image: postgres:16-alpine
+    container_name: source-db
+    environment:
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - ./init-source.sql:/docker-entrypoint-initdb.d/init-source.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - iceberg-net
+  
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - iceberg-net
+  
+  iceberg-rest:
+    image: tabulario/iceberg-rest:latest
+    container_name: iceberg-rest
+    depends_on:
+      - minio
+    environment:
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: password
+      AWS_REGION: us-east-1
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+    ports:
+      - "8181:8181"
+    networks:
+      - iceberg-net
+  
+  trino:
+    image: trinodb/trino:443
+    container_name: trino
+    depends_on:
+      - iceberg-rest
+      - minio
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./iceberg-catalog.properties:/etc/trino/catalog/iceberg.properties
+    networks:
+      - iceberg-net
+  
+  airflow:
+    image: apache/airflow:2.9.1-python3.11
+    container_name: airflow
+    depends_on:
+      - source-db
+      - iceberg-rest
+    environment:
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/airflow.db
+      _PIP_ADDITIONAL_REQUIREMENTS: "pyiceberg[pyarrow,pandas] psycopg2-binary"
+    volumes:
+      - ./dags:/opt/airflow/dags
+    command: standalone
+    ports:
+      - "8081:8080"
+    networks:
+      - iceberg-net
+
+volumes:
+  minio-data:
+
+networks:
+  iceberg-net:
