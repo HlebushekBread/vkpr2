@@ -1,9 +1,3 @@
-"""
-DAG обновления витрины
-
-Источник -> pandas DataFrame -> агрегация -> запись в Iceberg через pyiceberg.
-Идемпотентно: витрина перезаписывается целиком, поэтому повторный запуск не даёт дублей.
-"""
 from datetime import datetime
 
 import pandas as pd
